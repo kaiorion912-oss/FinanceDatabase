@@ -34,3 +34,11 @@ Educational tool, not investment advice. Backtests suffer survivorship bias (tod
 and ignore taxes. Data is daily, end-of-day.
 
 Tests: `pytest tests -q` (synthetic data).
+
+## Host it (public link)
+Needs a host that can reach Yahoo Finance and run a Docker container. `render.yaml` + `Dockerfile`
+at the repo root deploy to Render: New → Blueprint → pick this repo/branch → set `TRADEBOT_PASSWORD`.
+The page then asks for a password (any username). Prices download in the background after the
+server starts; the dashboard shows progress and retries. Without a persistent disk, your saved
+portfolio is lost on each redeploy. Env vars: `TRADEBOT_PASSWORD`, `TRADEBOT_UNIVERSE_LIMIT`
+(fewer stocks = less RAM), `PORT`, `HOST`.

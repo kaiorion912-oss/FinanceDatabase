@@ -108,7 +108,7 @@ let lastPrices={};
 async function api(path,body,method){
   const r=await fetch(path,{method:method||(body?'POST':'GET'),headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
   const j=await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error(j.detail||('Request failed ('+r.status+')'));
+  if(!r.ok){const e=new Error(j.detail||('Request failed ('+r.status+')'));e.status=r.status;throw e}
   return j;
 }
 function note(t,k='err'){$('#msg').innerHTML=t?`<div class="banner ${k}">${esc(t)}</div>`:''}
@@ -160,7 +160,7 @@ function recTable(rows,holding){
 }
 async function loadPicks(refresh){
   const b=$('#go_picks');busy(b,true,'Get suggestions');note('');
-  $('#picks_out').innerHTML='<p class="mute">Downloading ~7,400 NYSE/Nasdaq stocks (illiquid ones are filtered out)… the first run can take 10+ minutes; later runs use the cache.</p>';
+  $('#picks_out').innerHTML='<p class="mute">Scoring stocks… if the server just started it is still downloading prices (10+ minutes the first time); this page retries automatically.</p>';
   try{
     const d=await api('/api/recommendations',{...settings(),refresh:!!refresh});
     d.leaderboard.concat(d.recommendations).forEach(r=>lastPrices[r.ticker]=r.price);
@@ -180,7 +180,7 @@ async function loadPicks(refresh){
     h+=`<div class="card"><h2>Top 25 ranked stocks</h2><div class="tw"><table><thead><tr><th>#</th><th>Ticker</th><th class="l">Name</th><th class="l">Sector</th><th>Price</th><th>Score</th><th>12-1m</th><th>3m</th><th>RSI</th><th>Vol</th><th>Stop ≈</th></tr></thead><tbody>`+
       d.leaderboard.map(r=>`<tr><td>${r.rank}</td><td><b>${esc(r.ticker)}</b></td><td class="l mute">${esc(r.name)}</td><td class="l mute">${esc(r.sector)}</td><td>${money(r.price)}</td><td>${r.score}</td><td class="${cls(r.mom_12_1)}">${r.mom_12_1}%</td><td class="${cls(r.mom_3m)}">${r.mom_3m}%</td><td>${r.rsi}</td><td>${r.volatility}%</td><td>${money(r.stop)}</td></tr>`).join('')+'</tbody></table></div></div>';
     $('#picks_out').innerHTML=h;
-  }catch(e){$('#picks_out').innerHTML='';note(e.message)}
+  }catch(e){if(e.status===503){$('#picks_out').innerHTML='<p class="mute">'+esc(e.message)+'</p>';setTimeout(()=>loadPicks(false),5000);return}$('#picks_out').innerHTML='';note(e.message)}
   busy(b,false,'Get suggestions');
 }
 $('#go_picks').onclick=()=>loadPicks(false);$('#go_refresh').onclick=()=>loadPicks(true);
@@ -222,7 +222,7 @@ async function runBt(){
     const draw=()=>{lineChart($('#c1'),d.curve.dates,[{v:d.curve.benchmark,c:'#98a2b3'},{v:d.curve.equity,c:acc}],v=>'$'+Math.round(v).toLocaleString());
       lineChart($('#c2'),d.curve.dates,[{v:d.curve.drawdown,c:getComputedStyle(document.body).getPropertyValue('--sell')}],v=>v.toFixed(0)+'%')};
     draw();window.onresize=draw;
-  }catch(e){$('#bt_out').innerHTML='';note(e.message)}
+  }catch(e){if(e.status===503){$('#bt_out').innerHTML='<p class="mute">'+esc(e.message)+'</p>';setTimeout(runBt,5000);return}$('#bt_out').innerHTML='';note(e.message)}
   busy(b,false,'Run backtest');
 }
 $('#go_bt').onclick=runBt;

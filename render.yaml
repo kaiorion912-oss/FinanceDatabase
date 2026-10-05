@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: trade-dashboard
+    runtime: docker
+    plan: starter            # 512 MB RAM; use "standard" (2 GB) to cover the full ~7,400-stock universe
+    healthCheckPath: /healthz
+    disk:
+      name: tradebot-data    # keeps your saved portfolio + price cache across deploys
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: TRADEBOT_PASSWORD
+        sync: false          # you type this in the Render dashboard; it is the page password
+      - key: TRADEBOT_UNIVERSE_LIMIT
+        value: "1500"        # delete this line on the standard plan for all stocks

@@ -64,14 +64,30 @@ def test_portfolio_validation_and_csv(tmp_path, monkeypatch):
     assert pf.parse_csv("ticker,shares,cost\nMSFT,5,310\nBRK.B,1,\n")[0]["ticker"] == "MSFT"
 
 
-def test_api(tmp_path, monkeypatch):
+def test_api(tmp_path, monkeypatch, panel):
+    import app.server as srv
     monkeypatch.setattr(pf, "PATH", tmp_path / "p.json")
+    monkeypatch.setitem(srv.STATE, "panel", None)
     c = TestClient(app)
+    assert c.post("/api/recommendations", json={}).status_code == 503  # still loading
+    assert c.get("/api/status").json()["ready"] is False
+    monkeypatch.setitem(srv.STATE, "panel", panel)
+    monkeypatch.setitem(srv.STATE, "universe", load_universe())
     assert c.put("/api/portfolio", json={"cash": 100, "positions": [{"ticker": "AAPL", "shares": 1, "cost": 1}]}).status_code == 200
     assert c.put("/api/portfolio", json={"cash": -1}).status_code == 422
     assert c.post("/api/recommendations", json={}).json()["synthetic"] is True
     assert c.post("/api/backtest", json={"years": 1}).status_code == 200
     assert c.get("/").status_code == 200
+
+
+def test_password_gate(monkeypatch):
+    import app.server as srv
+    monkeypatch.setattr(srv, "PASSWORD", "s3cret")
+    c = TestClient(app)
+    assert c.get("/").status_code == 401
+    assert c.get("/healthz").status_code == 200
+    assert c.get("/", auth=("me", "wrong")).status_code == 401
+    assert c.get("/", auth=("me", "s3cret")).status_code == 200
 
 
 def test_full_universe_and_liquidity_guard():

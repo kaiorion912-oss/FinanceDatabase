@@ -18,6 +18,8 @@ CACHE_DIR = Path(os.environ.get("TRADEBOT_CACHE", Path(__file__).resolve().paren
 CACHE_TTL = 6 * 3600
 BENCHMARK = "SPY"
 _lock = threading.Lock()
+PROGRESS = {"done": 0, "total": 0}
+_mem: dict = {}
 
 
 class DataError(RuntimeError):
@@ -90,8 +92,10 @@ def _liquid(close: pd.DataFrame, volume: pd.DataFrame) -> pd.Series:
 def _download(tickers: list[str], years: float, keep: frozenset = frozenset()) -> Panel:
     start = (pd.Timestamp.today() - pd.Timedelta(days=int(365.25 * years))).strftime("%Y-%m-%d")
     parts: dict[str, list[pd.DataFrame]] = {f: [] for f in ("Open", "High", "Low", "Close", "Volume")}
+    PROGRESS.update(done=0, total=len(tickers))
     for i in range(0, len(tickers), CHUNK):
         chunk = tickers[i:i + CHUNK]
+        PROGRESS["done"] = i
         try:
             raw = _fetch_chunk(chunk, start)
         except Exception:
@@ -120,9 +124,12 @@ def get_panel(tickers: list[str], years: float = 5.0, refresh: bool = False,
     """Daily OHLCV for `tickers` + benchmark (+ `keep`: user holdings, exempt from the
     liquidity filter and fetched separately so the big universe cache is reused)."""
     wanted = sorted(set(tickers) | {BENCHMARK})
-    base = _universe_panel(wanted, years, refresh)
+    return add_holdings(_universe_panel(wanted, years, refresh), keep, years)
+
+
+def add_holdings(base: Panel, keep: tuple, years: float = 5.0) -> Panel:
     missing = [t for t in keep if t not in base.close.columns]
-    if not missing or demo_mode():
+    if not missing or base.synthetic:
         return base
     try:
         extra = _download(missing, years, frozenset(missing))
@@ -141,13 +148,19 @@ def _universe_panel(wanted: list[str], years: float, refresh: bool) -> Panel:
     key = hashlib.md5(",".join(wanted).encode()).hexdigest()[:10]
     cache = CACHE_DIR / f"prices-{key}-{years:g}y.pkl"
     with _lock:
+        hit = _mem.get(key)
+        if not refresh and hit and time.time() - hit[0] < CACHE_TTL:
+            return hit[1]
         if not refresh and cache.exists() and time.time() - cache.stat().st_mtime < CACHE_TTL:
             try:
-                return pd.read_pickle(cache)
+                p = pd.read_pickle(cache)
+                _mem[key] = (cache.stat().st_mtime, p)
+                return p
             except Exception:
                 pass  # corrupt cache -> re-download
         p = _download(wanted, years, frozenset({BENCHMARK}))
         if BENCHMARK not in p.close.columns:
             raise DataError(f"benchmark {BENCHMARK} missing from download")
         pd.to_pickle(p, cache)
+        _mem[key] = (time.time(), p)
         return p

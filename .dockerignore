@@ -1,0 +1,7 @@
+.git
+tradebot/.venv
+tradebot/.cache
+tradebot/data
+**/__pycache__
+database/etfs
+database/funds
