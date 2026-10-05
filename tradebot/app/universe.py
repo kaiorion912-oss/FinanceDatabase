@@ -23,18 +23,23 @@ FALLBACK = {
 US_MICS = {"XNYS", "XNAS"}  # the foreign-exchange listings of US firms have unusable tickers
 
 
-def load_universe(limit: int = 300) -> dict[str, dict]:
-    """Return {symbol: {name, sector}}: non-delisted US-listed Mega Cap, then Large Cap, equities."""
+TIERS = ("Mega Cap", "Large Cap", "Mid Cap", "Small Cap", "Micro Cap", "Nano Cap", "")
+
+
+def load_universe(limit: int | None = None) -> dict[str, dict]:
+    """Return {symbol: {name, sector}} for every non-delisted NYSE/Nasdaq equity, biggest first.
+
+    Warrants/units/rights (symbols with dots or long suffixes) are excluded by SYMBOL.
+    """
     out: dict[str, dict] = {}
     if DB_DIR.is_dir():
-        for tier in ("Mega Cap", "Large Cap"):
+        for tier in TIERS:
             for path in sorted(DB_DIR.glob("*.csv")):
                 with path.open(newline="", encoding="utf-8") as fh:
                     for row in csv.DictReader(fh):
                         sym = row["symbol"].strip().upper().replace(".", "-")
                         if (
-                            row["country"] == "United States"
-                            and row["mic"] in US_MICS
+                            row["mic"] in US_MICS
                             and row["market_cap"] == tier
                             and row["delisted"] != "True"
                             and SYMBOL.match(sym)
@@ -43,4 +48,4 @@ def load_universe(limit: int = 300) -> dict[str, dict]:
                             out[sym] = {"name": row["name"], "sector": row["sector"] or "Unknown"}
     if not out:
         out = {s: {"name": n, "sector": sec} for s, (n, sec) in FALLBACK.items()}
-    return dict(list(out.items())[:limit])
+    return dict(list(out.items())[:limit]) if limit else out

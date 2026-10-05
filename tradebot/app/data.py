@@ -65,31 +65,76 @@ def _synthetic(tickers: list[str], years: float) -> Panel:
     return Panel(*(pd.DataFrame(frames[f], index=idx) for f in frames), "SYNTHETIC DEMO DATA", True)
 
 
-def _download(tickers: list[str], years: float) -> Panel:
+MIN_PRICE, MIN_DOLLAR_VOL, CHUNK = 5.0, 5e6, 400
+
+
+def _fetch_chunk(tickers: list[str], start: str):
     import yfinance as yf
 
-    start = (pd.Timestamp.today() - pd.Timedelta(days=int(365.25 * years))).strftime("%Y-%m-%d")
     raw = yf.download(tickers, start=start, auto_adjust=True, progress=False,
                       group_by="column", threads=True)
     if raw is None or raw.empty:
-        raise DataError("Yahoo Finance returned no data (network blocked or rate limited?)")
+        return None
     if not isinstance(raw.columns, pd.MultiIndex):  # single ticker
         raw.columns = pd.MultiIndex.from_product([raw.columns, tickers[:1]])
-    fields = {}
-    for f in ("Open", "High", "Low", "Close", "Volume"):
-        df = raw[f].copy()
-        df.index = pd.DatetimeIndex(df.index).tz_localize(None)
-        fields[f.lower()] = df.dropna(axis=1, how="all")
-    # keep only symbols with usable OHLC; drop rows where the benchmark didn't trade
-    cols = [c for c in fields["close"].columns
-            if all(c in fields[f].columns for f in fields)]
-    panel = [fields[f][cols].sort_index() for f in ("open", "high", "low", "close", "volume")]
-    return Panel(*panel, "Yahoo Finance (split/dividend adjusted)", False)
+    raw.index = pd.DatetimeIndex(raw.index).tz_localize(None)
+    return raw
 
 
-def get_panel(tickers: list[str], years: float = 5.0, refresh: bool = False) -> Panel:
-    """Daily OHLCV for `tickers` + benchmark. Cached for CACHE_TTL seconds."""
+def _liquid(close: pd.DataFrame, volume: pd.DataFrame) -> pd.Series:
+    """Tradable now: recent price >= MIN_PRICE and median daily $ volume >= MIN_DOLLAR_VOL."""
+    dv = (close * volume).tail(120).median()
+    return (close.ffill().iloc[-1] >= MIN_PRICE) & (dv >= MIN_DOLLAR_VOL)
+
+
+def _download(tickers: list[str], years: float, keep: frozenset = frozenset()) -> Panel:
+    start = (pd.Timestamp.today() - pd.Timedelta(days=int(365.25 * years))).strftime("%Y-%m-%d")
+    parts: dict[str, list[pd.DataFrame]] = {f: [] for f in ("Open", "High", "Low", "Close", "Volume")}
+    for i in range(0, len(tickers), CHUNK):
+        chunk = tickers[i:i + CHUNK]
+        try:
+            raw = _fetch_chunk(chunk, start)
+        except Exception:
+            raw = None  # one bad batch must not sink the whole universe
+        if raw is None:
+            continue
+        close = raw["Close"].dropna(axis=1, how="all")
+        liquid = _liquid(close, raw["Volume"][close.columns])
+        kept = close.columns[liquid | close.columns.isin(keep)]  # always keep user holdings
+        for f in parts:  # drop illiquid names immediately to keep memory small
+            parts[f].append(raw[f][kept].astype("float32"))
+    if not parts["Close"]:
+        raise DataError("Yahoo Finance returned no data (network blocked or rate limited?)")
+    fields = {f.lower(): pd.concat(v, axis=1).sort_index() for f, v in parts.items()}
+    cols = [c for c in fields["close"].columns if c in fields["open"].columns]
+    # drop days when nothing traded (e.g. partial rows) and rows with all-NaN prices
+    fields = {f: d[cols].dropna(how="all").astype(float) for f, d in fields.items()}
+    idx = fields["close"].index
+    fields = {f: d.reindex(idx) for f, d in fields.items()}
+    return Panel(fields["open"], fields["high"], fields["low"], fields["close"], fields["volume"],
+                 "Yahoo Finance (split/dividend adjusted)", False)
+
+
+def get_panel(tickers: list[str], years: float = 5.0, refresh: bool = False,
+              keep: tuple = ()) -> Panel:
+    """Daily OHLCV for `tickers` + benchmark (+ `keep`: user holdings, exempt from the
+    liquidity filter and fetched separately so the big universe cache is reused)."""
     wanted = sorted(set(tickers) | {BENCHMARK})
+    base = _universe_panel(wanted, years, refresh)
+    missing = [t for t in keep if t not in base.close.columns]
+    if not missing or demo_mode():
+        return base
+    try:
+        extra = _download(missing, years, frozenset(missing))
+    except DataError:
+        return base  # holdings without data are flagged REVIEW downstream
+    idx = base.close.index.union(extra.close.index)
+    merged = [pd.concat([getattr(base, f).reindex(idx), getattr(extra, f).reindex(idx)], axis=1)
+              for f in ("open", "high", "low", "close", "volume")]
+    return Panel(*merged, base.source, base.synthetic)
+
+
+def _universe_panel(wanted: list[str], years: float, refresh: bool) -> Panel:
     if demo_mode():
         return _synthetic(wanted, years)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -98,11 +143,10 @@ def get_panel(tickers: list[str], years: float = 5.0, refresh: bool = False) -> 
     with _lock:
         if not refresh and cache.exists() and time.time() - cache.stat().st_mtime < CACHE_TTL:
             try:
-                p: Panel = pd.read_pickle(cache)
-                return p
+                return pd.read_pickle(cache)
             except Exception:
                 pass  # corrupt cache -> re-download
-        p = _download(wanted, years)
+        p = _download(wanted, years, frozenset({BENCHMARK}))
         if BENCHMARK not in p.close.columns:
             raise DataError(f"benchmark {BENCHMARK} missing from download")
         pd.to_pickle(p, cache)

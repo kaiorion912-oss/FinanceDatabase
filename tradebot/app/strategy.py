@@ -10,8 +10,6 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from finance.indicators import atr, macd, rsi
-
 from .data import BENCHMARK, Panel
 
 
@@ -25,6 +23,8 @@ class Params:
     atr_stop_mult: float = 2.5  # suggested protective stop = price - mult * ATR
     regime_filter: bool = True  # halve exposure when benchmark < its 200d average
     min_history: int = 260
+    min_price: float = 5.0          # liquidity guards: never pick penny / illiquid stocks
+    min_dollar_vol: float = 5e6     # median 60d daily $ volume
 
 
 @dataclass
@@ -40,11 +40,31 @@ class Factors:
     mom12_1: pd.DataFrame
     mom3: pd.DataFrame
     regime_on: pd.Series = field(default=None)
+    liquid: pd.DataFrame = field(default=None)
 
 
-def _apply(fn, *frames):
-    cols = {c: fn(*(f[c] for f in frames)) for c in frames[0].columns}
-    return pd.DataFrame(cols, index=frames[0].index)
+def _wilder(df: pd.DataFrame, window: int = 14) -> pd.DataFrame:
+    """Wilder smoothing across all columns at once (same recursion as finance.indicators.smma)."""
+    return df.ewm(alpha=1 / window, adjust=False, min_periods=window).mean()
+
+
+def rsi_panel(c: pd.DataFrame, window: int = 14) -> pd.DataFrame:
+    d = c.diff()
+    up, dn = _wilder(d.clip(lower=0), window), _wilder(-d.clip(upper=0), window)
+    tot = up + dn
+    return (100 * up / tot.where(tot != 0)).mask(tot == 0, 50)
+
+
+def atr_panel(h, l, c, window: int = 14) -> pd.DataFrame:
+    pc = c.shift()
+    tr = np.maximum(h - l, np.maximum((h - pc).abs(), (l - pc).abs()))
+    return _wilder(tr, window)
+
+
+def macd_hist_panel(c: pd.DataFrame, fast=12, slow=26, signal=9) -> pd.DataFrame:
+    ema = lambda x, n: x.ewm(span=n, adjust=False, min_periods=n).mean()  # noqa: E731
+    line = ema(c, fast) - ema(c, slow)
+    return line - ema(line, signal)
 
 
 def _xs_rank(df: pd.DataFrame) -> pd.DataFrame:
@@ -52,12 +72,18 @@ def _xs_rank(df: pd.DataFrame) -> pd.DataFrame:
     return df.rank(axis=1, pct=True) - 0.5
 
 
-def compute_factors(panel: Panel, p: Params | None = None) -> Factors:
+def compute_factors(panel: Panel, p: Params | None = None, keep=()) -> Factors:
     p = p or Params()
     c, h, l = panel.close, panel.high, panel.low
     bench = c[BENCHMARK]
     stocks = [t for t in c.columns if t != BENCHMARK]
     c, h, l = c[stocks], h[stocks], l[stocks]
+    # only compute indicators for names that were liquid recently (thousands of columns otherwise)
+    dollar_vol = (c * panel.volume[stocks]).rolling(60, min_periods=30).median()
+    liquid = (c >= p.min_price) & (dollar_vol >= p.min_dollar_vol)
+    ever = liquid.tail(250).any() & (c.count() >= p.min_history)
+    stocks = [t for t in stocks if ever[t] or t in keep]
+    c, h, l, liquid = c[stocks], h[stocks], l[stocks], liquid[stocks]
 
     mom12_1 = c.shift(21) / c.shift(252) - 1
     mom6 = c.shift(5) / c.shift(126) - 1
@@ -65,9 +91,9 @@ def compute_factors(panel: Panel, p: Params | None = None) -> Factors:
     rel = mom12_1.sub(bench.shift(21) / bench.shift(252) - 1, axis=0)
     vol = np.log(c).diff().rolling(60).std() * np.sqrt(252)
     s50, s200 = c.rolling(50).mean(), c.rolling(200).mean()
-    rsi14 = _apply(rsi, c)
-    hist = _apply(lambda x: macd(x)["histogram"], c) / c  # normalised by price
-    atr14 = _apply(atr, h, l, c)
+    rsi14 = rsi_panel(c)
+    hist = macd_hist_panel(c) / c  # normalised by price
+    atr14 = atr_panel(h, l, c)
 
     score = (
         0.35 * _xs_rank(mom12_1)
@@ -78,9 +104,9 @@ def compute_factors(panel: Panel, p: Params | None = None) -> Factors:
         + 0.05 * _xs_rank(hist)
     )
     score = score.where(rsi14 < 85, score - 0.15)  # fade blow-off spikes
-    eligible = (c > s200) & (s50 > s200) & (mom12_1 > 0) & score.notna()
+    eligible = (c > s200) & (s50 > s200) & (mom12_1 > 0) & score.notna() & liquid
     regime = (bench > bench.rolling(200).mean()).reindex(c.index).fillna(False)
-    return Factors(score, eligible, vol, s50, s200, rsi14, hist, atr14, mom12_1, mom3, regime)
+    return Factors(score, eligible, vol, s50, s200, rsi14, hist, atr14, mom12_1, mom3, regime, liquid)
 
 
 def target_weights(f: Factors, panel: Panel, p: Params, start: int = 0) -> pd.DataFrame:
@@ -132,7 +158,7 @@ def target_weights(f: Factors, panel: Panel, p: Params, start: int = 0) -> pd.Da
 
 def recommend(panel: Panel, meta: dict, portfolio: dict, p: Params | None = None) -> dict:
     p = p or Params()
-    f = compute_factors(panel, p)
+    f = compute_factors(panel, p, keep=tuple(x["ticker"] for x in portfolio.get("positions", [])))
     last = f.score.index[-1]
     close = panel.close.iloc[-1]
     score = f.score.loc[last].dropna().sort_values(ascending=False)
@@ -181,6 +207,10 @@ def recommend(panel: Panel, meta: dict, portfolio: dict, p: Params | None = None
         reasons, action = [], "HOLD"
         if pnl is not None and pnl <= -p.stop_loss:
             action, reasons = "SELL", [f"Down {pnl:.1%} vs your cost basis (stop-loss {p.stop_loss:.0%})."]
+        elif t not in f.score.columns or not bool(f.liquid.at[last, t]):
+            action = "REVIEW"
+            reasons = [f"Below the model's liquidity floor (price ≥ ${p.min_price:g}, "
+                       f"${p.min_dollar_vol / 1e6:g}M/day traded) or too little history; not scored."]
         elif not f.eligible.at[last, t]:
             action = "SELL"
             reasons = ["Trend broke: fails price > 200d avg, 50d > 200d, or 12-1m momentum > 0."]

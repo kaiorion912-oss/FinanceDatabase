@@ -12,8 +12,8 @@ from .strategy import Params, compute_factors, target_weights
 
 def run_backtest(panel: Panel, params: Params, years: float = 3.0, initial_cash: float = 10000,
                  commission: float = 0.001, slippage: float = 0.0005) -> dict:
-    stocks = [t for t in panel.close.columns if t != BENCHMARK]
     f = compute_factors(panel, params)
+    stocks = list(f.score.columns)
     idx = panel.close.index
     start_date = idx[-1] - pd.Timedelta(days=int(365.25 * years))
     start = int(idx.searchsorted(start_date))

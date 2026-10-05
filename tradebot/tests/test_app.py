@@ -72,3 +72,28 @@ def test_api(tmp_path, monkeypatch):
     assert c.post("/api/recommendations", json={}).json()["synthetic"] is True
     assert c.post("/api/backtest", json={"years": 1}).status_code == 200
     assert c.get("/").status_code == 200
+
+
+def test_full_universe_and_liquidity_guard():
+    u = load_universe()
+    assert len(u) > 5000 and "AAPL" in u
+    import numpy as np
+    from app.data import Panel, _synthetic
+    pan = _synthetic(["AAA", "BBB", "SPY"], 5)
+    pan.volume["BBB"] = 10.0  # ~$1k/day: illiquid, must never be eligible
+    f = compute_factors(pan, Params())
+    assert "BBB" not in f.eligible.columns  # illiquid names are never scored
+    r = recommend(pan, {}, {"cash": 0, "positions": [{"ticker": "BBB", "shares": 1, "cost": 1}]})
+    assert r["recommendations"][0]["action"] == "REVIEW"
+
+
+def test_vectorised_indicators_match_toolkit():
+    from app.data import _synthetic
+    from app.strategy import atr_panel, macd_hist_panel, rsi_panel
+    from finance.indicators import atr, macd, rsi
+
+    pan = _synthetic(["AAA", "SPY"], 5)
+    c, h, l = pan.close[["AAA"]], pan.high[["AAA"]], pan.low[["AAA"]]
+    assert abs(rsi_panel(c)["AAA"].iloc[-1] - rsi(c["AAA"]).iloc[-1]) < 0.5
+    assert abs(atr_panel(h, l, c)["AAA"].iloc[-1] / atr(h["AAA"], l["AAA"], c["AAA"]).iloc[-1] - 1) < 0.01
+    assert abs(macd_hist_panel(c)["AAA"].iloc[-1] - macd(c["AAA"])["histogram"].iloc[-1]) < 1e-6

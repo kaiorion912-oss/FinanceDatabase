@@ -160,7 +160,7 @@ function recTable(rows,holding){
 }
 async function loadPicks(refresh){
   const b=$('#go_picks');busy(b,true,'Get suggestions');note('');
-  $('#picks_out').innerHTML='<p class="mute">Downloading market data and scoring ~300 stocks… the first run can take a minute.</p>';
+  $('#picks_out').innerHTML='<p class="mute">Downloading ~7,400 NYSE/Nasdaq stocks (illiquid ones are filtered out)… the first run can take 10+ minutes; later runs use the cache.</p>';
   try{
     const d=await api('/api/recommendations',{...settings(),refresh:!!refresh});
     d.leaderboard.concat(d.recommendations).forEach(r=>lastPrices[r.ticker]=r.price);

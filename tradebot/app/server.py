@@ -50,7 +50,7 @@ class BacktestIn(Settings):
 def _panel(extra: list[str], refresh: bool, years: float = 5.0):
     uni = load_universe()
     try:
-        return uni, get_panel(sorted(set(uni) | set(extra)), years=years, refresh=refresh)
+        return uni, get_panel(sorted(uni), years=years, refresh=refresh, keep=tuple(extra))
     except DataError as e:
         raise HTTPException(502, str(e))
     except Exception as e:  # network / provider failures surface as a readable message

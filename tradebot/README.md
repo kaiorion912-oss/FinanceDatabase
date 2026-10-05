@@ -1,6 +1,6 @@
 # Trade Suggestion Dashboard
 
-A local dashboard that scores ~300 US large/mega-cap stocks on real daily market data
+A local dashboard that scores every NYSE/Nasdaq stock (~7,400; illiquid names filtered out) on real daily market data
 (Yahoo Finance), suggests BUY / SELL / TRIM / HOLD trades for **your** portfolio, and
 replays the same rules with paper money to backtest them.
 
@@ -14,7 +14,7 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python -m app            # open http://127.0.0.1:8000
 ```
-First request downloads ~5y of prices (cached 6h in `.cache/`). Offline UI demo with
+First request downloads ~5y of prices for ~7,400 tickers in batches (10+ minutes; cached 6h in `.cache/`). Stocks under $5 or under $5M/day traded are never picked. Offline UI demo with
 clearly-labelled fake prices: `TRADEBOT_DEMO=1 python -m app`.
 
 ## Tabs
