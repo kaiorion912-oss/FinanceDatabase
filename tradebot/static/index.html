@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade Suggestion Dashboard</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#14181f;--mute:#667085;--line:#e4e7ec;--accent:#2457d6;
+--buy:#0a7d4b;--buybg:#e3f6ec;--sell:#c0322b;--sellbg:#fde8e6;--trim:#a15c00;--trimbg:#fff1d9;--hold:#475467;--holdbg:#eef0f3}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1116;--card:#171b22;--ink:#e8ebf0;--mute:#98a2b3;--line:#2a303a;--accent:#7aa2ff;
+--buy:#4cd08d;--buybg:#12301f;--sell:#ff8a80;--sellbg:#3a1a18;--trim:#ffc266;--trimbg:#3a2b10;--hold:#b6bdc9;--holdbg:#232832}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{padding:18px 20px 0;max-width:1200px;margin:0 auto}h1{font-size:20px;margin:0 0 2px}
+.sub{color:var(--mute);font-size:13px}
+nav{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:14px 0 0}
+nav button{background:none;border:0;color:var(--mute);padding:10px 14px;font:inherit;font-weight:600;cursor:pointer;border-bottom:2px solid transparent}
+nav button.on{color:var(--accent);border-color:var(--accent)}
+main{max-width:1200px;margin:0 auto;padding:16px 20px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums}.stat span{color:var(--mute);font-size:12px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:8px 8px;border-bottom:1px solid var(--line);font-size:14px}
+th:first-child,td:first-child,th.l,td.l{text-align:left}th{color:var(--mute);font-weight:600;font-size:12px;white-space:nowrap}
+.tw{overflow-x:auto}
+.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-weight:700;font-size:12px}
+.BUY{background:var(--buybg);color:var(--buy)}.SELL{background:var(--sellbg);color:var(--sell)}
+.TRIM,.REVIEW{background:var(--trimbg);color:var(--trim)}.HOLD{background:var(--holdbg);color:var(--hold)}
+.pos{color:var(--buy)}.neg{color:var(--sell)}.mute{color:var(--mute)}.why{color:var(--mute);font-size:13px;text-align:left}
+button.btn,.btn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer}
+button.btn.alt{background:var(--holdbg);color:var(--ink)}button:disabled{opacity:.5;cursor:wait}
+input,textarea{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:7px 9px;font:inherit;width:100%}
+label{font-size:12px;color:var(--mute);display:block;margin-bottom:3px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:end}.row>div{min-width:110px;flex:1}
+.banner{padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:14px}
+.err{background:var(--sellbg);color:var(--sell)}.warn{background:var(--trimbg);color:var(--trim)}.info{background:var(--holdbg)}
+canvas{width:100%;height:300px;display:block}.legend{font-size:12px;color:var(--mute);display:flex;gap:14px;margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+.hide{display:none}h2{font-size:16px;margin:0 0 10px}small{color:var(--mute)}
+.disc{font-size:12px;color:var(--mute);margin-top:20px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Trade Suggestion Dashboard</h1>
+  <div class="sub" id="meta">Momentum &amp; trend model on real market data · not financial advice</div>
+  <nav>
+    <button data-tab="picks" class="on">Today’s picks</button>
+    <button data-tab="portfolio">My portfolio</button>
+    <button data-tab="bt">Paper-money backtest</button>
+  </nav>
+</header>
+<main>
+<div id="msg"></div>
+
+<section id="picks">
+  <div class="card"><div class="row">
+    <div><label>Target # of positions</label><input id="s_top" type="number" value="10" min="3" max="30"></div>
+    <div><label>Max per position (%)</label><input id="s_max" type="number" value="15" min="5" max="50"></div>
+    <div><label>Stop-loss vs cost (%)</label><input id="s_stop" type="number" value="12" min="3" max="50"></div>
+    <div><label><input id="s_reg" type="checkbox" checked style="width:auto"> Cut exposure in bear markets</label></div>
+    <div style="flex:0"><button class="btn" id="go_picks">Get suggestions</button></div>
+    <div style="flex:0"><button class="btn alt" id="go_refresh" title="Re-download prices">Refresh data</button></div>
+  </div></div>
+  <div id="picks_out"></div>
+</section>
+
+<section id="portfolio" class="hide">
+  <div class="card">
+    <h2>Enter your current holdings</h2>
+    <div class="tw"><table id="pf_table"><thead><tr><th>Ticker</th><th>Shares</th><th>Avg cost / share ($)</th><th>Price</th><th>Value</th><th>P/L</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="row" style="margin-top:12px">
+      <div style="flex:0"><button class="btn alt" id="add_row">+ Add holding</button></div>
+      <div style="max-width:200px"><label>Cash ($)</label><input id="pf_cash" type="number" min="0" step="0.01" value="0"></div>
+      <div style="flex:0"><button class="btn" id="save_pf">Save portfolio</button></div>
+    </div>
+    <p class="sub">Saved only on this computer (<code>data/portfolio.json</code>). Prices load after you press “Get suggestions”.</p>
+  </div>
+  <div class="card">
+    <h2>…or paste / import CSV</h2>
+    <textarea id="csv" rows="5" placeholder="ticker,shares,avg_cost&#10;AAPL,10,150.25&#10;MSFT,5,310"></textarea>
+    <div class="row" style="margin-top:10px"><div style="flex:0"><button class="btn" id="imp">Import (replaces holdings)</button></div>
+      <div style="flex:0"><input type="file" id="csvfile" accept=".csv,text/csv,text/plain"></div></div>
+  </div>
+</section>
+
+<section id="bt" class="hide">
+  <div class="card"><div class="row">
+    <div><label>Starting paper cash ($)</label><input id="b_cash" type="number" value="10000" min="100"></div>
+    <div><label>Years to replay</label><input id="b_years" type="number" value="3" min="0.5" max="4" step="0.5"></div>
+    <div><label>Commission (%)</label><input id="b_comm" type="number" value="0.10" step="0.01" min="0"></div>
+    <div><label>Slippage (%)</label><input id="b_slip" type="number" value="0.05" step="0.01" min="0"></div>
+    <div><label>Rebalance every (days)</label><input id="b_reb" type="number" value="5" min="1" max="63"></div>
+    <div style="flex:0"><button class="btn" id="go_bt">Run backtest</button></div>
+  </div><p class="sub" style="margin:10px 0 0">Uses the strategy settings from the “Today’s picks” tab.</p></div>
+  <div id="bt_out"></div>
+</section>
+<div class="disc">Educational research tool, not investment advice. Backtests use today’s large-cap universe (survivorship bias) and cannot guarantee future results. Verify prices and your own situation before trading.</div>
+</main>
+<script>
+const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=x=>x==null?'—':(x<0?'-':'')+'$'+Math.abs(x).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const pct=(x,d=1)=>x==null?'—':(x*100).toFixed(d)+'%';
+const cls=x=>x>0?'pos':x<0?'neg':'';
+let lastPrices={};
+
+async function api(path,body,method){
+  const r=await fetch(path,{method:method||(body?'POST':'GET'),headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.detail||('Request failed ('+r.status+')'));
+  return j;
+}
+function note(t,k='err'){$('#msg').innerHTML=t?`<div class="banner ${k}">${esc(t)}</div>`:''}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  ['picks','portfolio','bt'].forEach(id=>$('#'+id).classList.toggle('hide',id!==b.dataset.tab));note('');
+});
+const settings=()=>({top_n:+$('#s_top').value,max_weight:+$('#s_max').value/100,stop_loss:+$('#s_stop').value/100,regime_filter:$('#s_reg').checked});
+function busy(btn,on,label){btn.disabled=on;if(label)btn.textContent=on?'Working…':label}
+
+/* ---------- portfolio ---------- */
+function addRow(p={}){
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><input class="t" value="${esc(p.ticker||'')}" placeholder="AAPL" style="width:90px"></td>
+  <td><input class="sh" type="number" min="0" step="any" value="${esc(p.shares||'')}" style="width:100px"></td>
+  <td><input class="c" type="number" min="0" step="any" value="${esc(p.cost||'')}" style="width:120px"></td>
+  <td class="px mute">—</td><td class="val mute">—</td><td class="pl mute">—</td><td><button class="btn alt x">✕</button></td>`;
+  tr.querySelector('.x').onclick=()=>tr.remove();
+  $('#pf_table tbody').appendChild(tr);paintRow(tr);
+}
+function paintRow(tr){
+  const t=tr.querySelector('.t').value.trim().toUpperCase().replace('.','-'),px=lastPrices[t];
+  const sh=+tr.querySelector('.sh').value,c=+tr.querySelector('.c').value;
+  tr.querySelector('.px').textContent=px?money(px):'—';
+  tr.querySelector('.val').textContent=px&&sh?money(px*sh):'—';
+  const pl=tr.querySelector('.pl');
+  if(px&&sh&&c){const g=(px/c-1);pl.textContent=pct(g)+' ('+money((px-c)*sh)+')';pl.className='pl '+cls(g)}else{pl.textContent='—';pl.className='pl mute'}
+}
+function readPortfolio(){
+  return {cash:+$('#pf_cash').value||0,positions:[...document.querySelectorAll('#pf_table tbody tr')].map(tr=>({
+    ticker:tr.querySelector('.t').value,shares:+tr.querySelector('.sh').value||0,cost:+tr.querySelector('.c').value||0})).filter(p=>p.ticker.trim())};
+}
+function showPortfolio(p){
+  $('#pf_table tbody').innerHTML='';p.positions.forEach(addRow);if(!p.positions.length)addRow();$('#pf_cash').value=p.cash;
+}
+$('#add_row').onclick=()=>addRow();
+$('#save_pf').onclick=async()=>{try{showPortfolio(await api('/api/portfolio',readPortfolio(),'PUT'));note('Portfolio saved.','info')}catch(e){note(e.message)}};
+$('#imp').onclick=async()=>{try{showPortfolio(await api('/api/portfolio/import',{text:$('#csv').value}));note('Imported.','info')}catch(e){note(e.message)}};
+$('#csvfile').onchange=async e=>{const f=e.target.files[0];if(f)$('#csv').value=await f.text()};
+
+/* ---------- picks ---------- */
+function factCell(r){return `${r.mom_12_1==null?'—':r.mom_12_1+'%'}`}
+function recTable(rows,holding){
+  if(!rows.length)return '<p class="mute">Nothing to show.</p>';
+  return `<div class="tw"><table><thead><tr><th>Action</th><th>Ticker</th><th class="l">Name</th><th>Shares</th><th>Price</th><th>Weight</th><th>Rank</th><th>12-1m</th><th>RSI</th><th class="l">Why</th></tr></thead><tbody>`+
+  rows.map(r=>`<tr><td><span class="pill ${esc(r.action)}">${esc(r.action)}</span></td><td><b>${esc(r.ticker)}</b></td><td class="l mute">${esc(r.name)}</td>
+  <td>${r.shares||'—'}</td><td>${r.price!=null?money(r.price):'—'}</td><td>${r.weight!=null?pct(r.weight):'—'}</td><td>${r.rank??'—'}</td><td class="${cls(r.mom_12_1)}">${factCell(r)}</td><td>${r.rsi??'—'}</td>
+  <td class="why">${(r.reasons||[]).map(esc).join('<br>')}</td></tr>`).join('')+'</tbody></table></div>';
+}
+async function loadPicks(refresh){
+  const b=$('#go_picks');busy(b,true,'Get suggestions');note('');
+  $('#picks_out').innerHTML='<p class="mute">Downloading market data and scoring ~300 stocks… the first run can take a minute.</p>';
+  try{
+    const d=await api('/api/recommendations',{...settings(),refresh:!!refresh});
+    d.leaderboard.concat(d.recommendations).forEach(r=>lastPrices[r.ticker]=r.price);
+    document.querySelectorAll('#pf_table tbody tr').forEach(paintRow);
+    $('#meta').textContent=`Data: ${d.source} · as of ${d.asof} · ${d.universe_size} stocks scored`;
+    const acts=d.recommendations.filter(r=>r.action!=='HOLD');
+    let h='';
+    if(d.synthetic)h+='<div class="banner warn">SYNTHETIC DEMO DATA — these are not real prices or real picks.</div>';
+    if(d.example_account)h+='<div class="banner info">No portfolio saved yet — buys are sized for an example $10,000 account. Enter your holdings on the “My portfolio” tab.</div>';
+    h+=`<div class="grid" style="margin-bottom:16px"><div class="stat"><b>${money(d.equity)}</b><span>Portfolio value</span></div>
+      <div class="stat"><b>${acts.filter(r=>r.action==='BUY').length}</b><span>Suggested buys</span></div>
+      <div class="stat"><b>${acts.filter(r=>r.action==='SELL'||r.action==='TRIM').length}</b><span>Sells / trims</span></div></div>
+      <div class="banner info"><b>Market regime:</b> ${esc(d.market_regime)}</div>`;
+    h+=`<div class="card"><h2>Suggested trades</h2>${recTable(acts)}</div>`;
+    const holds=d.recommendations.filter(r=>r.action==='HOLD');
+    if(holds.length)h+=`<div class="card"><h2>Keep holding</h2>${recTable(holds)}</div>`;
+    h+=`<div class="card"><h2>Top 25 ranked stocks</h2><div class="tw"><table><thead><tr><th>#</th><th>Ticker</th><th class="l">Name</th><th class="l">Sector</th><th>Price</th><th>Score</th><th>12-1m</th><th>3m</th><th>RSI</th><th>Vol</th><th>Stop ≈</th></tr></thead><tbody>`+
+      d.leaderboard.map(r=>`<tr><td>${r.rank}</td><td><b>${esc(r.ticker)}</b></td><td class="l mute">${esc(r.name)}</td><td class="l mute">${esc(r.sector)}</td><td>${money(r.price)}</td><td>${r.score}</td><td class="${cls(r.mom_12_1)}">${r.mom_12_1}%</td><td class="${cls(r.mom_3m)}">${r.mom_3m}%</td><td>${r.rsi}</td><td>${r.volatility}%</td><td>${money(r.stop)}</td></tr>`).join('')+'</tbody></table></div></div>';
+    $('#picks_out').innerHTML=h;
+  }catch(e){$('#picks_out').innerHTML='';note(e.message)}
+  busy(b,false,'Get suggestions');
+}
+$('#go_picks').onclick=()=>loadPicks(false);$('#go_refresh').onclick=()=>loadPicks(true);
+
+/* ---------- backtest ---------- */
+function lineChart(cv,dates,series,fmt){
+  const dpr=devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;cv.width=W*dpr;cv.height=H*dpr;
+  const g=cv.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,W,H);
+  const st=getComputedStyle(document.body),mute=st.getPropertyValue('--mute'),line=st.getPropertyValue('--line');
+  const all=series.flatMap(s=>s.v),lo=Math.min(...all),hi=Math.max(...all),pad=(hi-lo)*.06||1,L=62,R=10,T=10,B=24;
+  const x=i=>L+(W-L-R)*i/(dates.length-1),y=v=>T+(H-T-B)*(1-(v-(lo-pad))/((hi+pad)-(lo-pad)));
+  g.font='11px system-ui';g.fillStyle=mute;g.strokeStyle=line;g.lineWidth=1;
+  for(let k=0;k<=4;k++){const v=lo-pad+((hi-lo)+2*pad)*k/4,yy=y(v);g.beginPath();g.moveTo(L,yy);g.lineTo(W-R,yy);g.stroke();g.textAlign='right';g.fillText(fmt(v),L-6,yy+4)}
+  g.textAlign='center';[0,.25,.5,.75,1].forEach(f=>{const i=Math.round(f*(dates.length-1));g.fillText(dates[i],Math.min(Math.max(x(i),L+25),W-R-25),H-6)});
+  series.forEach(s=>{g.strokeStyle=s.c;g.lineWidth=2;g.beginPath();s.v.forEach((v,i)=>i?g.lineTo(x(i),y(v)):g.moveTo(x(i),y(v)));g.stroke()});
+}
+async function runBt(){
+  const b=$('#go_bt');busy(b,true,'Run backtest');note('');$('#bt_out').innerHTML='<p class="mute">Replaying the strategy day by day…</p>';
+  try{
+    const d=await api('/api/backtest',{...settings(),years:+$('#b_years').value,initial_cash:+$('#b_cash').value,commission:+$('#b_comm').value/100,slippage:+$('#b_slip').value/100,rebalance_days:+$('#b_reb').value});
+    const m=d.metrics,bm=d.benchmark,acc=getComputedStyle(document.body).getPropertyValue('--accent');
+    const win=d.final_equity>=bm.final_equity;
+    $('#bt_out').innerHTML=(d.synthetic?'<div class="banner warn">SYNTHETIC DEMO DATA — results are meaningless.</div>':'')+
+    `<div class="grid" style="margin-bottom:16px">
+      <div class="stat"><b>${money(d.final_equity)}</b><span>Final paper equity (from ${money(d.initial_cash)})</span></div>
+      <div class="stat"><b class="${cls(m.total_return)}">${pct(m.total_return)}</b><span>Strategy total return</span></div>
+      <div class="stat"><b class="${cls(bm.total_return)}">${pct(bm.total_return)}</b><span>${esc(bm.name)} buy &amp; hold</span></div>
+      <div class="stat"><b>${pct(m.cagr)}</b><span>CAGR (SPY ${pct(bm.cagr)})</span></div>
+      <div class="stat"><b>${m.sharpe?.toFixed(2)}</b><span>Sharpe (SPY ${bm.sharpe?.toFixed(2)})</span></div>
+      <div class="stat"><b class="neg">${pct(m.max_drawdown)}</b><span>Max drawdown (SPY ${pct(bm.max_drawdown)})</span></div>
+      <div class="stat"><b>${pct(m.avg_exposure,0)}</b><span>Avg invested</span></div>
+      <div class="stat"><b>${money(m.commissions)}</b><span>Costs paid · ${m.fills} fills</span></div></div>
+    <div class="banner ${win?'info':'warn'}">${win?'Strategy beat':'Strategy trailed'} ${esc(bm.name)} over ${esc(d.start)} → ${esc(d.end)} on ${d.universe_tested} stocks.</div>
+    <div class="card"><h2>Equity curve</h2><canvas id="c1"></canvas><div class="legend"><span><i style="background:${acc}"></i>Strategy</span><span><i style="background:#98a2b3"></i>${esc(bm.name)} buy &amp; hold</span></div></div>
+    <div class="card"><h2>Drawdown (%)</h2><canvas id="c2" style="height:180px"></canvas></div>
+    <div class="card"><h2>Positions held at end</h2><div class="tw"><table><thead><tr><th>Ticker</th><th>Shares</th><th>Value</th></tr></thead><tbody>${d.open_positions.map(p=>`<tr><td>${esc(p.ticker)}</td><td>${p.shares}</td><td>${money(p.value)}</td></tr>`).join('')}<tr><td>Cash</td><td></td><td>${money(d.cash)}</td></tr></tbody></table></div></div>
+    <div class="card"><h2>Most recent trades</h2><div class="tw"><table><thead><tr><th>Date</th><th>Ticker</th><th>Side</th><th>Shares</th><th>Price</th></tr></thead><tbody>${d.trades.slice().reverse().slice(0,60).map(t=>`<tr><td>${esc(t.date)}</td><td>${esc(t.ticker)}</td><td><span class="pill ${t.side}">${t.side}</span></td><td>${t.shares}</td><td>${money(t.price)}</td></tr>`).join('')}</tbody></table></div></div>
+    <ul class="sub">${d.notes.map(n=>'<li>'+esc(n)+'</li>').join('')}</ul>`;
+    const draw=()=>{lineChart($('#c1'),d.curve.dates,[{v:d.curve.benchmark,c:'#98a2b3'},{v:d.curve.equity,c:acc}],v=>'$'+Math.round(v).toLocaleString());
+      lineChart($('#c2'),d.curve.dates,[{v:d.curve.drawdown,c:getComputedStyle(document.body).getPropertyValue('--sell')}],v=>v.toFixed(0)+'%')};
+    draw();window.onresize=draw;
+  }catch(e){$('#bt_out').innerHTML='';note(e.message)}
+  busy(b,false,'Run backtest');
+}
+$('#go_bt').onclick=runBt;
+api('/api/portfolio').then(showPortfolio).catch(()=>addRow());
+</script>
+</body>
+</html>
